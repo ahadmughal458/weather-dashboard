@@ -3,9 +3,8 @@
 <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Weather Dashboard</title>
+    <title>Weather Dashboard – Pakistan</title>
     <style>
-        /* ----- RESET & BASE ----- */
         * {
             margin: 0;
             padding: 0;
@@ -22,7 +21,7 @@
             align-items: center;
         }
         .app {
-            max-width: 800px;
+            max-width: 820px;
             width: 100%;
             background: rgba(22, 27, 34, 0.85);
             backdrop-filter: blur(12px);
@@ -31,8 +30,6 @@
             box-shadow: 0 25px 50px -10px rgba(0,0,0,0.6);
             border: 1px solid rgba(48, 54, 61, 0.4);
         }
-
-        /* ----- HEADER ----- */
         .header {
             display: flex;
             justify-content: space-between;
@@ -83,8 +80,6 @@
             transform: scale(1.03);
             box-shadow: 0 6px 20px rgba(46,160,67,0.3);
         }
-
-        /* ----- UNIT TOGGLE & FAVORITES ----- */
         .controls {
             display: flex;
             justify-content: space-between;
@@ -134,8 +129,6 @@
         .favorites button:hover {
             background: #30363d;
         }
-
-        /* ----- CURRENT WEATHER ----- */
         .current {
             background: #0d1117;
             border-radius: 24px;
@@ -181,8 +174,6 @@
             color: #e6edf3;
             font-weight: 500;
         }
-
-        /* ----- FORECAST ----- */
         .forecast {
             display: grid;
             grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
@@ -218,8 +209,6 @@
             color: #8b949e;
             text-transform: capitalize;
         }
-
-        /* ----- ERROR & LOADING ----- */
         .error {
             color: #f85149;
             background: rgba(248,81,73,0.1);
@@ -247,8 +236,6 @@
             50% { content: '..'; }
             75% { content: '...'; }
         }
-
-        /* ----- RESPONSIVE ----- */
         @media (max-width: 600px) {
             .app { padding: 20px 16px; }
             .current { flex-direction: column; align-items: flex-start; gap: 15px; }
@@ -275,7 +262,7 @@
                 <button id="unitF">°F</button>
             </div>
             <div class="favorites" id="favoritesContainer">
-                <!-- Favorites will be injected here -->
+                <!-- Favorites injected here -->
             </div>
         </div>
 
@@ -292,7 +279,8 @@
             <div class="current-right">
                 <div>💧 Humidity: <span id="humidity">--</span>%</div>
                 <div>💨 Wind: <span id="windSpeed">--</span> km/h</div>
-                <div>☀️ UV Index: <span id="uvIndex">--</span></div>
+                <div>🌅 Sunrise: <span id="sunrise">--</span></div>
+                <div>🌇 Sunset: <span id="sunset">--</span></div>
             </div>
         </div>
 
@@ -308,18 +296,21 @@
 
     <script>
         // ============================================================
-        // CONFIGURATION
+        // CONFIGURATION – NO API KEY NEEDED (uses Open-Meteo)
         // ============================================================
-        // 🔑 GET YOUR FREE API KEY: https://openweathermap.org/api
-        const API_KEY = 'YOUR_API_KEY'; // <-- Replace with your key
-        const BASE_URL = 'https://api.openweathermap.org/data/2.5/';
+        // Coordinates for Nawabshah, Pakistan (default)
+        const DEFAULT_LAT = 26.2442;
+        const DEFAULT_LON = 68.4037;
+        const DEFAULT_CITY = 'Nawabshah';
 
         // ============================================================
         // STATE
         // ============================================================
-        let currentCity = 'London';
+        let currentCity = DEFAULT_CITY;
+        let currentLat = DEFAULT_LAT;
+        let currentLon = DEFAULT_LON;
         let unit = 'metric';    // 'metric' for °C, 'imperial' for °F
-        let favorites = JSON.parse(localStorage.getItem('weatherFavorites')) || [];
+        let favorites = JSON.parse(localStorage.getItem('weatherFavorites')) || ['Nawabshah', 'Karachi', 'Lahore', 'Islamabad'];
 
         // ============================================================
         // DOM REFS
@@ -337,7 +328,8 @@
         const weatherDesc = document.getElementById('weatherDesc');
         const humidity = document.getElementById('humidity');
         const windSpeed = document.getElementById('windSpeed');
-        const uvIndex = document.getElementById('uvIndex');
+        const sunrise = document.getElementById('sunrise');
+        const sunset = document.getElementById('sunset');
         const forecastContainer = document.getElementById('forecastContainer');
 
         // ============================================================
@@ -357,110 +349,171 @@
             return unit === 'metric' ? 'km/h' : 'mph';
         }
 
-        // Convert Kelvin to target unit
-        function convertTemp(kelvin) {
-            if (unit === 'metric') return Math.round(kelvin - 273.15);
-            else return Math.round((kelvin - 273.15) * 9/5 + 32);
+        // Convert temperature from Celsius to target unit
+        function convertTemp(celsius) {
+            if (unit === 'metric') return Math.round(celsius);
+            else return Math.round(celsius * 9/5 + 32);
         }
 
-        // Format date for forecast
-        function formatDate(timestamp) {
-            const d = new Date(timestamp * 1000);
-            return d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+        // Format time (HH:MM) from Unix timestamp
+        function formatTime(unixTime) {
+            const d = new Date(unixTime * 1000);
+            return d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
         }
 
         // ============================================================
-        // API CALLS
+        // CITY COORDINATE LOOKUP (using Open-Meteo Geocoding – free)
         // ============================================================
-        async function fetchWeather(city) {
-            try {
-                // Current weather
-                const currentRes = await fetch(
-                    `${BASE_URL}weather?q=${city}&appid=${API_KEY}`
-                );
-                if (!currentRes.ok) throw new Error('City not found');
-                const currentData = await currentRes.json();
-
-                // 5-day forecast
-                const forecastRes = await fetch(
-                    `${BASE_URL}forecast?q=${city}&appid=${API_KEY}`
-                );
-                if (!forecastRes.ok) throw new Error('Forecast not available');
-                const forecastData = await forecastRes.json();
-
-                // UV Index (requires lat/lon)
-                const { lat, lon } = currentData.coord;
-                const uvRes = await fetch(
-                    `https://api.openweathermap.org/data/2.5/uvi?lat=${lat}&lon=${lon}&appid=${API_KEY}`
-                );
-                let uv = '--';
-                if (uvRes.ok) {
-                    const uvData = await uvRes.json();
-                    uv = uvData.value;
-                }
-
-                return { current: currentData, forecast: forecastData, uv };
-            } catch (err) {
-                throw err;
+        async function getCoordinates(city) {
+            const url = `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(city)}&count=1&language=en&format=json`;
+            const res = await fetch(url);
+            if (!res.ok) throw new Error('Geocoding failed');
+            const data = await res.json();
+            if (!data.results || data.results.length === 0) {
+                throw new Error(`City "${city}" not found`);
             }
+            const result = data.results[0];
+            return {
+                lat: result.latitude,
+                lon: result.longitude,
+                name: result.name,
+                country: result.country
+            };
+        }
+
+        // ============================================================
+        // WEATHER FETCH (Open-Meteo)
+        // ============================================================
+        async function fetchWeather(lat, lon) {
+            // Current weather + daily forecast (7 days) + sunrise/sunset
+            const url = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&current_weather=true&daily=weathercode,temperature_2m_max,temperature_2m_min,sunrise,sunset&timezone=auto&forecast_days=7`;
+            const res = await fetch(url);
+            if (!res.ok) throw new Error('Weather data fetch failed');
+            const data = await res.json();
+            return data;
+        }
+
+        // ============================================================
+        // WEATHER CODE TO ICON & DESCRIPTION
+        // ============================================================
+        function getWeatherInfo(code) {
+            // WMO Weather interpretation codes (https://open-meteo.com/en/docs)
+            const map = {
+                0: { icon: '☀️', desc: 'Clear sky' },
+                1: { icon: '🌤️', desc: 'Mainly clear' },
+                2: { icon: '⛅', desc: 'Partly cloudy' },
+                3: { icon: '☁️', desc: 'Overcast' },
+                45: { icon: '🌫️', desc: 'Fog' },
+                48: { icon: '🌫️', desc: 'Depositing rime fog' },
+                51: { icon: '🌦️', desc: 'Light drizzle' },
+                53: { icon: '🌧️', desc: 'Moderate drizzle' },
+                55: { icon: '🌧️', desc: 'Dense drizzle' },
+                61: { icon: '🌧️', desc: 'Light rain' },
+                63: { icon: '🌧️', desc: 'Moderate rain' },
+                65: { icon: '🌧️', desc: 'Heavy rain' },
+                71: { icon: '🌨️', desc: 'Light snow' },
+                73: { icon: '🌨️', desc: 'Moderate snow' },
+                75: { icon: '🌨️', desc: 'Heavy snow' },
+                80: { icon: '🌦️', desc: 'Rain showers' },
+                81: { icon: '🌦️', desc: 'Moderate showers' },
+                82: { icon: '🌧️', desc: 'Violent showers' },
+                95: { icon: '⛈️', desc: 'Thunderstorm' },
+                96: { icon: '⛈️', desc: 'Thunderstorm with hail' },
+                99: { icon: '⛈️', desc: 'Thunderstorm with heavy hail' },
+            };
+            return map[code] || { icon: '❓', desc: 'Unknown' };
         }
 
         // ============================================================
         // RENDER
         // ============================================================
-        function renderWeather(data) {
-            const { current, forecast, uv } = data;
+        function renderWeather(data, cityNameStr) {
+            const current = data.current_weather;
+            const daily = data.daily;
 
-            // Current
-            const tempKelvin = current.main.temp;
-            const temp = convertTemp(tempKelvin);
+            // Current temperature
+            const tempC = current.temperature;
+            const temp = convertTemp(tempC);
             temperature.textContent = `${temp}${getUnitSymbol()}`;
-            cityName.textContent = current.name;
-            weatherDesc.textContent = current.weather[0].description;
-            humidity.textContent = current.main.humidity;
-            windSpeed.textContent = `${Math.round(current.wind.speed * (unit === 'metric' ? 3.6 : 2.237))} ${getWindUnit()}`;
-            uvIndex.textContent = uv;
 
-            // Icon
-            const iconCode = current.weather[0].icon;
-            weatherIcon.src = `https://openweathermap.org/img/wn/${iconCode}@4x.png`;
-            weatherIcon.alt = current.weather[0].description;
+            // City name
+            cityName.textContent = cityNameStr;
 
-            // Forecast (filter every 24h, take 5 days)
-            const dailyForecasts = forecast.list.filter((item, index) => index % 8 === 0).slice(0, 5);
+            // Weather description & icon
+            const weather = getWeatherInfo(current.weathercode);
+            weatherDesc.textContent = weather.desc;
+            weatherIcon.textContent = weather.icon; // using emoji instead of image
+            weatherIcon.style.fontSize = '64px';
+            weatherIcon.src = ''; // clear any src
+
+            // Humidity (not provided by current_weather, we use daily average? skip for now)
+            humidity.textContent = '--'; // Open-Meteo current doesn't provide humidity directly
+
+            // Wind speed (convert from m/s to km/h or mph)
+            const windMs = current.windspeed;
+            const wind = unit === 'metric' ? windMs * 3.6 : windMs * 2.237;
+            windSpeed.textContent = `${Math.round(wind)} ${getWindUnit()}`;
+
+            // Sunrise/Sunset (from daily)
+            if (daily.sunrise && daily.sunrise.length > 0) {
+                const rise = new Date(daily.sunrise[0]).getTime() / 1000;
+                const set = new Date(daily.sunset[0]).getTime() / 1000;
+                sunrise.textContent = formatTime(rise);
+                sunset.textContent = formatTime(set);
+            } else {
+                sunrise.textContent = '--';
+                sunset.textContent = '--';
+            }
+
+            // Forecast (daily)
             forecastContainer.innerHTML = '';
-            dailyForecasts.forEach(day => {
-                const date = new Date(day.dt * 1000);
+            // We only show 5 days (skip today if desired, but we'll show all)
+            for (let i = 1; i < Math.min(daily.time.length, 6); i++) {
+                const date = new Date(daily.time[i]);
                 const dayName = date.toLocaleDateString('en-US', { weekday: 'short' });
-                const tempDay = convertTemp(day.main.temp);
-                const icon = day.weather[0].icon;
-                const desc = day.weather[0].description;
+                const maxC = daily.temperature_2m_max[i];
+                const minC = daily.temperature_2m_min[i];
+                const max = convertTemp(maxC);
+                const min = convertTemp(minC);
+                const code = daily.weathercode[i];
+                const info = getWeatherInfo(code);
 
                 const card = document.createElement('div');
                 card.className = 'forecast-day';
                 card.innerHTML = `
                     <div class="day">${dayName}</div>
-                    <img src="https://openweathermap.org/img/wn/${icon}@2x.png" alt="${desc}" />
-                    <div class="temp">${tempDay}${getUnitSymbol()}</div>
-                    <div class="desc">${desc}</div>
+                    <div style="font-size:28px;">${info.icon}</div>
+                    <div class="temp">${max}${getUnitSymbol()} / ${min}${getUnitSymbol()}</div>
+                    <div class="desc">${info.desc}</div>
                 `;
                 forecastContainer.appendChild(card);
-            });
+            }
         }
 
         // ============================================================
         // MAIN UPDATE
         // ============================================================
-        async function updateWeather(city) {
+        async function updateWeather(cityName) {
             try {
-                const data = await fetchWeather(city);
-                renderWeather(data);
-                currentCity = city;
+                // Get coordinates
+                const geo = await getCoordinates(cityName);
+                currentLat = geo.lat;
+                currentLon = geo.lon;
+                currentCity = geo.name; // use official name
+
+                // Fetch weather
+                const weatherData = await fetchWeather(currentLat, currentLon);
+                renderWeather(weatherData, currentCity);
+
                 // Save last searched city
-                localStorage.setItem('lastCity', city);
+                localStorage.setItem('lastCity', currentCity);
+                cityInput.value = currentCity;
+
+                // Update favorites (if not already in list, we'll add automatically?)
+                // We'll let user double-click to add.
+
             } catch (err) {
                 showError(err.message || 'Failed to fetch weather');
-                // Keep previous data visible, but show error
             }
         }
 
@@ -533,13 +586,13 @@
         // ============================================================
         // INIT
         // ============================================================
-        // Load last city
-        const lastCity = localStorage.getItem('lastCity') || 'London';
+        // Load last city or default to Nawabshah
+        const lastCity = localStorage.getItem('lastCity') || DEFAULT_CITY;
         cityInput.value = lastCity;
         renderFavorites();
         updateWeather(lastCity);
 
-        console.log('🌤️ Weather Dashboard ready!');
+        console.log('🌤️ Weather Dashboard ready (Open-Meteo)');
         console.log('💡 Double-click city name to add to favorites.');
     </script>
 </body>
